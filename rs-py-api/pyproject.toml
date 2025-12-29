@@ -1,0 +1,10 @@
+[build-system]
+requires = ["maturin>=1,<2"]
+build-backend = "maturin"
+
+[project]
+name = "rs-py-api"
+version = "0.1.0"
+requires-python = ">=3.7"
+authors = [
+    {name = "Guntas Singh Saran", email = "guntas.saran13@gmail.com"}]
