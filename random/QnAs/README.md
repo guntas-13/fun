@@ -1,0 +1,1766 @@
+# Great Resources
+
+#### [[Core Dumped - Why Some Projects Use Multiple Programming Languages]](https://youtu.be/XJC5WB2Bwrc?si=BsyN0dlKaFoyXdj0)
+
+#### [[Nir Lichtman's YT Channel]](https://www.youtube.com/@nirlichtman)
+
+#### [[PowerCert Animated Videos]](https://www.youtube.com/@PowerCertAnimatedVideos)
+
+---
+
+# 💾 Compilers - OS-dependent or architecture-dependent?
+
+---
+
+## 1. Is a compiler OS-dependent or CPU-architecture-dependent?
+
+**Short answer:**
+**Both - but in different parts.**
+
+- The **compiler backend** is primarily **CPU-architecture dependent** (x86-64, ARM64, RISC-V).
+- The **toolchain as a whole** (compiler + assembler + linker + runtime) is **OS-dependent**.
+
+So a compiler is **not just one thing** - it’s a _pipeline_.
+
+---
+
+## 2. If two machines are both x86-64, can the same compiler output run on all OSes?
+
+**No.**
+Even on the same CPU architecture:
+
+- Linux
+- Windows
+- macOS
+
+**require different binaries.**
+
+Why?
+
+Because they differ in:
+
+- Executable format (ELF vs PE vs Mach-O)
+- System call interface
+- ABI (calling conventions, stack layout)
+- Runtime libraries (`glibc`, `msvcrt`, `libSystem`)
+
+---
+
+## 3. What part of the compiler actually cares about the CPU?
+
+The **backend**.
+
+This is where:
+
+- Instructions are chosen (`mov`, `add`, `jmp`)
+- Registers are allocated
+- Instruction scheduling is done
+
+Example:
+
+- x86-64 backend emits `mov rax, rbx`
+- ARM64 backend emits `mov x0, x1`
+
+This part is **OS-agnostic**.
+
+---
+
+## 4. What part of compilation is OS-dependent then?
+
+Everything _around_ the instructions:
+
+### OS-dependent components:
+
+- **ABI (Application Binary Interface)**
+- **Executable format**
+- **System libraries**
+- **Startup code**
+- **System call mechanism**
+
+Even the same instruction sequence must be wrapped differently depending on the OS.
+
+---
+
+## 5. What is an ABI and why does it matter?
+
+ABI defines:
+
+- How function arguments are passed
+- Which registers are caller/callee saved
+- Stack alignment
+- Name mangling rules
+- How system calls are invoked
+
+### Example (x86-64):
+
+| OS      | First function argument                |
+| ------- | -------------------------------------- |
+| Linux   | `rdi`                                  |
+| Windows | `rcx`                                  |
+| macOS   | `rdi` (but with other ABI differences) |
+
+So the compiler must **know the OS ABI** to generate correct code.
+
+---
+
+## 6. What happens if I take a Linux ELF binary and run it on Windows?
+
+It **won’t run**.
+
+Reasons:
+
+- Windows loader does not understand ELF
+- Windows kernel does not implement Linux syscalls
+- Runtime libraries are missing
+
+Even though the CPU instructions _might_ be valid.
+
+---
+
+## 7. Then why do people say “GCC targets x86-64”?
+
+Because **GCC has multiple targets**:
+
+```
+target = CPU architecture + OS + ABI
+```
+
+Examples:
+
+- `x86_64-linux-gnu`
+- `x86_64-w64-mingw32`
+- `aarch64-linux-gnu`
+
+Each target changes:
+
+- ABI rules
+- Linker behavior
+- Runtime expectations
+
+---
+
+## 8. Is the assembler OS-dependent?
+
+Yes.
+
+The assembler must emit:
+
+- ELF (Linux)
+- COFF/PE (Windows)
+- Mach-O (macOS)
+
+Same assembly → **different object file formats**.
+
+---
+
+## 9. Is the linker OS-dependent?
+
+Very much so.
+
+The linker:
+
+- Resolves symbols
+- Lays out sections
+- Produces final executable
+
+Each OS expects:
+
+- Different startup symbols (`_start`, `mainCRTStartup`)
+- Different dynamic loader paths
+- Different relocation formats
+
+---
+
+## 10. Where do system calls fit into this?
+
+System calls are **OS-specific**, not CPU-specific.
+
+Example: write to stdout
+
+### Linux:
+
+```asm
+mov rax, 1     ; SYS_write
+syscall
+```
+
+### Windows:
+
+```asm
+call WriteFile ; via kernel32.dll
+```
+
+Same CPU → completely different mechanism.
+
+---
+
+## 11. Why can LLVM/Clang feel "more portable" than GCC?
+
+Because LLVM:
+
+- Has a **clean IR**
+- Decouples frontends and backends more aggressively
+- Makes cross-compilation easier
+
+But **it still must respect OS ABI and formats**.
+
+LLVM is not magically OS-independent - it’s just better modularized.
+
+---
+
+## 12. What exactly is a "cross-compiler"?
+
+A compiler that:
+
+- Runs on **Host OS/Arch**
+- Produces binaries for **Target OS/Arch**
+
+Example:
+
+- Host: macOS ARM64
+- Target: Linux x86-64
+
+```
+clang --target=x86_64-linux-gnu
+```
+
+This is possible because:
+
+- CPU backend emits x86-64 instructions
+- Toolchain uses Linux ABI + ELF rules
+
+---
+
+## 13. Why do containers help with compilation portability?
+
+Because containers provide:
+
+- Target OS userland (headers, libc, linker)
+- Correct ABI expectations
+- Correct binary format
+
+But:
+
+- They **still use your host kernel**
+- They do **not emulate hardware** (unless QEMU is involved)
+
+---
+
+## 14. Final mental model
+
+### Think of compilation as layers:
+
+```
+Source Code
+   ↓
+Compiler Frontend (language-specific, OS-agnostic)
+   ↓
+IR Optimizations (OS-agnostic)
+   ↓
+Backend (CPU-specific)
+   ↓
+Assembler (OS-specific format)
+   ↓
+Linker (OS-specific ABI + runtime)
+   ↓
+Executable (OS + CPU bound)
+```
+
+---
+
+> **A compiler is CPU-aware at the instruction level, but OS-aware at the binary, ABI, and runtime level.**
+
+That’s why:
+
+- Same CPU ≠ same executable
+- Same source ≠ same binary
+- Same compiler ≠ same output across OSes
+
+---
+
+# 🧠 Systems, OS & Architecture
+
+---
+
+## 1. What is an "image"?
+
+**Q:** What does the term _image_ actually mean?
+
+**A:**
+An _image_ is a **binary representation of something that normally lives on hardware or memory**.
+
+Depending on context, it could be:
+
+- **Disk image** → byte-for-byte copy of a disk (`.img`)
+- **Filesystem image** → a formatted filesystem (`.iso`, `.squashfs`)
+- **Kernel image** → compressed executable kernel (`bzImage`, `vmlinuz`)
+- **Initramfs image** → early root filesystem (cpio archive)
+- **VM image** → virtual disk (`qcow2`, `vmdk`)
+
+> "Image" means _"ready to be loaded, mounted, or executed."_
+
+---
+
+## 2. What does it mean to _mount_ an image?
+
+**Q:** What does mounting an image do?
+
+**A:**
+Mounting means **attaching a filesystem to the directory tree** so the OS can access its contents.
+
+Example:
+
+```bash
+mount -o loop ubuntu.iso /mnt
+```
+
+Here:
+
+- `ubuntu.iso` is treated as a **block device**
+- Kernel reads its filesystem
+- Files appear under `/mnt`
+
+Mounting does **not execute** anything - it only exposes data.
+
+---
+
+## 3. What is a kernel image like `bzImage` and how does it boot?
+
+**Q:** What exactly is `bzImage`?
+
+**A:**
+`bzImage` is:
+
+- A **compressed Linux kernel**
+- Plus **small boot/setup code**
+- Plus a **decompressor**
+
+Boot sequence (simplified):
+
+```
+Firmware → Bootloader → bzImage
+            ↓
+        kernel setup
+            ↓
+       kernel decompresses itself
+            ↓
+        kernel starts execution
+```
+
+The kernel is **self-contained** and knows how to expand itself into RAM.
+
+---
+
+## 4. How does a bootable drive work?
+
+### BIOS vs UEFI
+
+**Q:** How does the system know a drive is bootable?
+
+### BIOS (legacy)
+
+- BIOS loads **first 512 bytes** (MBR)
+- Checks signature `0xAA55`
+- Executes boot code
+
+### UEFI (modern)
+
+- Reads **FAT32 EFI System Partition**
+- Loads `.efi` executable:
+
+  ```
+  /EFI/BOOT/BOOTX64.EFI
+  ```
+
+---
+
+## 5. How does Linux execute machine code from ELF?
+
+**Q:** How does kernel "run" machine instructions?
+
+**A:**
+Flow:
+
+```
+execve()
+ ↓
+Kernel reads ELF headers
+ ↓
+Maps segments into virtual memory
+ ↓
+Sets instruction pointer (RIP/PC)
+ ↓
+Switches to user mode
+ ↓
+CPU fetches instructions directly
+```
+
+Kernel **never interprets instructions**.
+CPU executes them **directly from memory**.
+
+The kernel only:
+
+- Loads
+- Maps
+- Protects
+- Switches context
+
+---
+
+## 6. What does "64-bit architecture" actually mean?
+
+**Q:** What is the "64" in x86_64 or ARM64?
+
+**A:**
+Primarily:
+
+- **Register width**
+- **Address width**
+- **Pointer size**
+- **Native arithmetic width**
+
+It does **not** limit SIMD.
+
+---
+
+## 7. Then how can CPUs do 512-bit operations?
+
+**Q:** If CPU is 64-bit, how does AVX-512 work?
+
+**A:**
+Because:
+
+- SIMD uses **separate vector registers**
+- ALUs are **physically wide internally**
+- Instructions operate on **packed data**
+
+Example:
+
+```
+512-bit vector = 8 × 64-bit values
+```
+
+The "64" refers to:
+
+> the **scalar architecture**, not SIMD width
+
+---
+
+## 8. Final
+
+- **Firmware** starts execution
+- **Bootloader** loads kernel
+- **Kernel** maps memory, schedules processes
+- **CPU** executes instructions directly
+- **64-bit** = scalar register & address width
+
+---
+
+# 🛜 Networks
+
+---
+
+# Basic Home Networking Q&A
+
+---
+
+## 1. What exactly is my home Wi-Fi "router"?
+
+**Q:** Is my home Wi-Fi device really a router?
+
+**A:**
+Yes - but not _only_ a router.
+
+It is **4 devices in one**:
+
+| Component               | OSI Layer |
+| ----------------------- | --------- |
+| Modem (DSL/Fiber/Cable) | L1–L2     |
+| Router (IP + NAT)       | L3        |
+| Ethernet switch         | L2        |
+| Wi-Fi Access Point      | L2        |
+
+That’s why it can:
+
+- Assign IPs
+- Route packets
+- Switch LAN traffic
+- Provide Wi-Fi
+
+---
+
+## 2. Is my home router part of the Internet?
+
+**Q:** Is my router visible to the global Internet?
+
+**A:**
+
+- **WAN side:** Yes, it’s an **IP node in the ISP network**
+- **LAN side:** No, it creates a **private network**
+
+Your ISP sees your router as:
+
+- A **Customer Premises Equipment (CPE)**
+- Assigned an IP (often private or CGNAT)
+
+---
+
+## 3. Why does my laptop have IP `192.168.x.x` but Google shows another IP?
+
+**Q:** Why two IPs?
+
+**A:**
+Because of **NAT (Network Address Translation)**.
+
+- `192.168.0.105` → **private LAN IP**
+- `117.235.41.78` → **public IP of ISP/NAT gateway**
+
+Your router (or ISP CGNAT) maps:
+
+```
+(private IP, private port) → (public IP, public port)
+```
+
+---
+
+## 4. How many devices can my home network support?
+
+**Q:** How many devices can my subnet have?
+
+**A:**
+Given:
+
+```
+192.168.0.0/24
+```
+
+- Network bits: 24
+- Host bits: 8
+- Total addresses: `2⁸ = 256`
+- Usable devices: **254**
+
+So your LAN can have **~254 devices** simultaneously.
+
+---
+
+## 5. I have 3 Wi-Fi routers at home - are they all "routers"?
+
+**Q:** Does my ISP configure 3 routers for my house?
+
+**A:**
+Usually **NO**.
+
+Common setups:
+
+### Case 1: One router + 2 access points
+
+- Only **one device does routing + DHCP**
+- Others act as **Wi-Fi APs**
+- Same IP pool everywhere
+
+### Case 2: Router-behind-router (bad design)
+
+- Each creates its own subnet
+- Causes **double NAT**
+- IP changes when switching Wi-Fi
+
+Most ISPs prefer **Case 1**.
+
+---
+
+## 6. Do all Wi-Fi devices give me different IPs?
+
+**Q:** When I switch Wi-Fi devices, does my IP change?
+
+**A:**
+
+- **Local IP:** changes _per device_
+- **Subnet:** same (if APs are bridged)
+- **Public IP:** same (unless WAN changes)
+
+So:
+
+```
+Laptop → 192.168.0.105
+Phone  → 192.168.0.106
+```
+
+Same gateway, same NAT.
+
+---
+
+## 7. How does the ISP assign IPs to home routers?
+
+**Q:** If WAN IPs aren’t global, how does ISP manage millions of users?
+
+**A:**
+Using **CGNAT (Carrier-Grade NAT)**.
+
+- Home routers get **private WAN IPs**
+- ISP edge routers share **public IPs**
+- NAT table tracks millions of connections
+
+Your visible IP is often **not your router**, but:
+
+> an **ISP edge NAT gateway**
+
+---
+
+## 8. Why does a website say "Your ISP can see your traffic"?
+
+**Q:** How does it know I’m "unprotected"?
+
+**A:**
+Because:
+
+- Your traffic is **unencrypted at ISP level** (unless HTTPS/VPN)
+- ISP sees:
+
+  - IPs you connect to
+  - DNS queries
+  - Traffic volume
+
+HTTPS hides _content_, not _metadata_.
+
+VPN encrypts everything → ISP sees only encrypted tunnel.
+
+---
+
+## 9. What is NAT in detail?
+
+**Q:** What exactly does NAT do?
+
+**A:**
+NAT maps:
+
+```
+(inside IP, inside port) → (outside IP, outside port)
+```
+
+Example:
+
+```
+192.168.0.10:54321 → 117.235.41.78:40001
+```
+
+Router maintains a **connection table**.
+
+This enables:
+
+- Many devices
+- One public IP
+- Stateful firewalling
+
+---
+
+## 10. Is NAT limited to 65,536 connections?
+
+**Q:** Are we limited by port numbers?
+
+**A:**
+Yes - **per public IP per protocol**.
+
+- TCP ports: ~65k
+- UDP ports: ~65k
+
+But ISPs scale by:
+
+- Multiple public IPs
+- Port reuse
+- Short-lived connections
+
+This is why IPv6 exists.
+
+---
+
+# Port forwarding, WAN vs LAN, CGNAT, Reachability [[Source]](https://www.youtube.com/watch?v=2G1ueMDgwxw)
+
+---
+
+## Q1. When I configure port forwarding on my home router, what am I actually enabling?
+
+**Answer:**
+You are creating a **NAT mapping** on the router that says:
+
+> "Any incoming packet arriving on **my WAN interface** at port `X` should be rewritten and forwarded to **this internal LAN IP and port**."
+
+Port forwarding does **not** make your LAN IP public.
+It only instructs the router how to handle traffic **that already reaches the router from the Internet**.
+
+---
+
+## Q2. With what IP and port will someone on the Internet reach my service?
+
+**Answer:**
+They must connect to:
+
+```
+<router’s public WAN IP>:<external port>
+```
+
+They **cannot** use:
+
+- `192.168.0.1` (LAN gateway)
+- Your machine’s LAN IP
+- Any private IP
+
+Only **globally routable public IPs** work for inbound Internet traffic.
+
+---
+
+## Q3. Why is `192.168.0.1` unreachable from the Internet?
+
+**Answer:**
+`192.168.0.1` belongs to a **private address space (RFC 1918)**.
+Private IPs:
+
+- Are not globally unique
+- Are never routed on the public Internet
+- Exist only within local networks
+
+Routers on the Internet will **drop such packets immediately**.
+
+---
+
+## Q4. How do I know whether my router actually has a public WAN IP?
+
+**Answer:**
+Compare two values:
+
+1. **Router’s WAN IP** (from admin page)
+2. **Public IP seen by Internet** (`curl ifconfig.me`)
+
+- If they **match** → you likely have a public IP
+- If they **differ** → you are behind another NAT (usually CGNAT)
+
+---
+
+## Q5. Why does port forwarding fail when I am behind CGNAT?
+
+**Answer:**
+Because your router is **not the Internet edge**.
+
+In CGNAT:
+
+```
+Internet → ISP NAT → Your Router → Your Device
+```
+
+You control NAT on **your router**, but:
+
+- You do **not** control the ISP’s NAT
+- Incoming packets stop at the ISP
+- No mapping exists for your port
+
+Therefore, packets never reach your router.
+
+---
+
+## Q6. Can I forward ports on my router to bypass CGNAT?
+
+**Answer:**
+❌ No.
+Port forwarding only works on the **outermost NAT device**.
+
+Since the ISP owns the outer NAT:
+
+- You cannot configure it
+- You cannot expose ports
+- Your router never sees unsolicited inbound traffic
+
+This is a **hard limitation**, not a configuration issue.
+
+---
+
+## Q7. Why does outbound traffic always work, even behind CGNAT?
+
+**Answer:**
+NAT allows **stateful outbound connections**:
+
+```
+Your device → Internet  (allowed)
+Internet → Your device  (only if state exists)
+```
+
+When you initiate a connection:
+
+- NAT creates a temporary mapping
+- Replies are allowed back in
+
+Inbound connections **without prior state** are dropped.
+
+---
+
+## Q8. Why does a reverse tunnel work behind CGNAT?
+
+**Answer:**
+Because **you initiate the connection**.
+
+Flow:
+
+```
+Your machine → Public server (outbound)
+Public users → Public server → existing tunnel → you
+```
+
+Since the tunnel is outbound:
+
+- NAT allows it
+- The public server becomes your Internet-facing endpoint
+
+This flips the connectivity direction.
+
+---
+
+## Q9. Why does IPv6 solve the port-forwarding problem?
+
+**Answer:**
+IPv6 removes NAT entirely.
+
+- Each device gets a **globally routable IP**
+- No address sharing
+- No translation
+- Only firewall rules apply
+
+With IPv6:
+
+```
+[Your device IPv6]:5000  → reachable directly
+```
+
+This is how the Internet was originally designed to work.
+
+---
+
+## Q10. Why do ISPs use CGNAT despite breaking hosting?
+
+**Answer:**
+Because IPv4 addresses are exhausted.
+
+CGNAT allows:
+
+- Thousands of users per public IP
+- Cost savings
+- Simplified ISP operations
+
+The trade-off:
+
+- End users lose inbound reachability
+- Hosting services becomes difficult
+
+---
+
+# Traceroute [[Source]](https://youtu.be/vJV-GBZ6PeM?si=z9uTR2awQJGDyRyf)
+
+---
+
+```
+traceroute google.com
+```
+
+```
+traceroute to google.com (142.250.182.14), 64 hops max, 40 byte packets
+ 1  192.168.0.1 (192.168.0.1)  3.830 ms  4.009 ms  3.397 ms
+ 2  192.168.1.1 (192.168.1.1)  3.455 ms  3.453 ms  3.462 ms
+ 3  triband-del-59.178.64.1.bol.net.in (59.178.64.1)  5.337 ms  6.973 ms  4.885 ms
+ 4  10.219.6.74 (10.219.6.74)  7.132 ms  6.555 ms  7.315 ms
+ 5  * * *
+ 6  * * *
+ 7  * * *
+ 8  * * *
+ 9  * * *
+10  * * *
+11  142.251.54.86 (142.251.54.86)  27.713 ms
+    142.251.52.230 (142.251.52.230)  20.557 ms
+    172.253.67.98 (172.253.67.98)  15.021 ms
+12  tzdelb-bf-in-f14.1e100.net (142.250.182.14)  13.405 ms
+    209.85.252.71 (209.85.252.71)  18.125 ms
+    142.251.255.54 (142.251.255.54)  19.328 ms
+```
+
+## Q1. What problem does `traceroute` actually solve?
+
+**Answer:**
+`traceroute` discovers the **layer-3 forwarding path** from your machine to a destination by exploiting the **TTL (Time To Live)** field in IP packets.
+
+It answers:
+
+> "Which routers decrement my packet’s TTL before it reaches the destination?"
+
+It does **not** measure bandwidth, throughput, or application performance.
+
+---
+
+## Q2. How does `traceroute` discover each hop?
+
+**Answer:**
+It sends packets with increasing TTL values:
+
+| TTL | What happens                                          |
+| --- | ----------------------------------------------------- |
+| 1   | First router drops packet → sends ICMP Time Exceeded  |
+| 2   | Second router drops packet → sends ICMP Time Exceeded |
+| …   | …                                                     |
+| N   | Destination replies (ICMP Echo or Port Unreachable)   |
+
+Each ICMP reply reveals the **IP address of that hop**.
+
+---
+
+## Q3. Why does each hop show **three time values**?
+
+**Answer:**
+By default, `traceroute` sends **three probe packets per TTL**.
+
+Each time value is the **round-trip time (RTT)** for one probe:
+
+```
+probe → router → ICMP reply → back to you
+```
+
+Multiple probes:
+
+- Reveal jitter
+- Detect packet loss
+- Improve confidence in measurements
+
+---
+
+## Q4. Are these times hop-to-hop delays?
+
+**Answer:**
+❌ No.
+
+They are **end-to-end RTTs from your machine to that hop**.
+
+So:
+
+- Hop 5 RTT includes time through hops 1–4
+- Hop 10 RTT includes time through hops 1–9
+
+Traceroute never measures:
+
+```
+hop N → hop N+1
+```
+
+---
+
+## Q5. Why do some hops show `* * *`?
+
+**Answer:**
+Because those routers **do not send ICMP TTL-expired replies**.
+
+Common reasons:
+
+- ICMP disabled or rate-limited
+- MPLS forwarding
+- Firewall policies
+- Control-plane protection
+
+Important:
+
+> `* * *` does **not** mean packet loss
+> It means **no diagnostic reply**
+
+---
+
+## Q6. Are packets still forwarded when hops are hidden?
+
+**Answer:**
+✅ Yes.
+
+Hidden routers:
+
+- Forward packets at hardware speed
+- Simply don’t respond to traceroute probes
+
+This is extremely common in:
+
+- ISP backbones
+- Cloud provider networks
+- Large enterprise cores
+
+---
+
+## Q7: What is happening at each hop in this `traceroute google.com` output?
+
+**Answer:**
+
+This traceroute shows how packets travel from **your laptop → home network → ISP → Google’s edge in Delhi**.
+Each numbered line is a **TTL boundary** where a router replied.
+
+---
+
+### **Hop 1**
+
+```
+1  192.168.0.1  3.8 ms  4.0 ms  3.4 ms
+```
+
+**What this is:**
+Your **home router (default gateway)**.
+
+**Why it appears:**
+First device that decrements TTL from 1 → 0.
+
+---
+
+### **Hop 2**
+
+```
+2  192.168.1.1  3.4 ms  3.4 ms  3.4 ms
+```
+
+**What this is:**
+Another **local network device** (secondary router / modem / ONT).
+
+**Key point:**
+Still inside your home or immediate ISP access network.
+
+---
+
+### **Hop 3**
+
+```
+3  triband-del-59.178.64.1.bol.net.in
+```
+
+**What this is:**
+Your **ISP’s edge router** in **Delhi**.
+
+**Why this matters:**
+This is where your traffic **enters the ISP’s public network**.
+
+---
+
+### **Hop 4**
+
+```
+4  10.219.6.74
+```
+
+**What this is:**
+An **internal ISP backbone router** using a private IP.
+
+**Why private IP is OK here:**
+ISPs commonly use RFC1918 addresses inside their core.
+
+---
+
+### **Hops 5–10**
+
+```
+5–10  * * *
+```
+
+**What this means:**
+Routers here:
+
+- Forward packets normally
+- **Do not send ICMP TTL-expired replies**
+
+**Important:**
+Traffic is **not lost** — these hops are simply **hidden**.
+
+This is typical inside:
+
+- ISP backbone
+- MPLS networks
+- Large provider cores
+
+---
+
+### **Hop 11**
+
+```
+11  142.251.54.86
+    142.251.52.230
+    172.253.67.98
+```
+
+**What this is:**
+You’ve **entered Google’s network**.
+
+**Why 3 IPs appear:**
+Google uses **ECMP (multiple equal-cost paths)**.
+Each probe hit a different Google router.
+
+**Latency drop (~15–27 ms):**
+You are very close to Google’s edge.
+
+---
+
+### **Hop 12 (Destination)**
+
+```
+12  tzdelb-bf-in-f14.1e100.net (142.250.182.14)
+```
+
+**What this is:**
+The **Google server** that answered `google.com`.
+
+**What `1e100.net` means:**
+Google-owned domain.
+
+**Why latency is low (~13 ms):**
+You are served from a **Google Delhi edge POP**.
+
+---
+
+## 🔑 One-line summary
+
+> **Home → ISP edge (Delhi) → hidden backbone → Google Delhi edge → google.com**
+
+Hidden hops don’t affect reachability — the **final RTT already includes everything**.
+
+---
+
+# 🦀 Interfacing Between Languages: Rust & C [[Source]](https://youtu.be/XJC5WB2Bwrc?si=BsyN0dlKaFoyXdj0)
+
+**(1) cross-language linking (Rust ↔ C)**
+**(2) object files & the linker**
+**(3) shared libraries (`.so`)**
+
+## PART 1 - How one language (Rust) calls another (C), and vice-versa
+
+### Core idea (very important)
+
+> **At link time, languages do not exist.**
+> Only **object files**, **symbols**, **ABIs**, and **calling conventions** exist.
+
+If two languages:
+
+1. Produce **object files** in the same format (ELF `.o`)
+2. Agree on **ABI** (how arguments are passed, how stack is used, name mangling)
+3. Expose compatible **symbols**
+
+-then they can be linked together.
+
+---
+
+### What is the ABI doing here?
+
+An **ABI (Application Binary Interface)** defines:
+
+- How function arguments are passed (registers vs stack)
+- How return values are passed
+- Stack alignment rules
+- Who cleans up the stack
+- Name mangling rules
+
+#### C ABI (on x86_64 Linux, System V ABI)
+
+- First args in `rdi, rsi, rdx, rcx, r8, r9`
+- Return in `rax`
+- Symbol names are **not mangled**
+
+Rust normally uses **Rust ABI**, which is _not_ stable across versions.
+
+So Rust must explicitly say:
+
+```rust
+extern "C"
+```
+
+This tells Rust:
+
+> “Generate code that follows the **C ABI**.”
+
+---
+
+## PART 2 - Example: Calling Rust from C
+
+### Step 1: Rust code (library)
+
+```rust
+// lib.rs
+#[no_mangle]
+pub extern "C" fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+```
+
+#### Why each keyword matters
+
+- `extern "C"` → use C calling convention
+- `#[no_mangle]` → prevent Rust from renaming the symbol
+- `pub` → make the symbol visible to the linker
+
+---
+
+## Step 2: Compile Rust to object or shared library
+
+#### Object file
+
+```bash
+rustc --crate-type=staticlib lib.rs
+```
+
+Produces:
+
+```
+liblib.a   (static library)
+```
+
+or:
+
+```bash
+rustc --crate-type=cdylib lib.rs
+```
+
+Produces:
+
+```
+liblib.so
+```
+
+---
+
+### Step 3: C code calling Rust
+
+```c
+// main.c
+#include <stdio.h>
+
+extern int add(int a, int b);
+
+int main() {
+    printf("%d\n", add(2, 3));
+    return 0;
+}
+```
+
+---
+
+### Step 4: Link C with Rust output
+
+#### Static linking
+
+```bash
+gcc main.c -L. -llib -o main
+```
+
+#### Dynamic linking
+
+```bash
+gcc main.c -L. -llib -Wl,-rpath=. -o main
+```
+
+---
+
+### What the linker is actually doing
+
+The linker:
+
+1. Sees `add` referenced in `main.o`
+2. Searches libraries (`liblib.a` or `liblib.so`)
+3. Finds symbol `add`
+4. Resolves the address
+5. Writes relocation entries into final ELF
+
+No knowledge of Rust or C is needed.
+
+---
+
+## PART 3 - Reverse: Calling C from Rust
+
+### C code
+
+```c
+// mul.c
+int mul(int a, int b) {
+    return a * b;
+}
+```
+
+Compile to object:
+
+```bash
+gcc -c mul.c -o mul.o
+```
+
+---
+
+### Rust code
+
+```rust
+extern "C" {
+    fn mul(a: i32, b: i32) -> i32;
+}
+
+fn main() {
+    unsafe {
+        println!("{}", mul(3, 4));
+    }
+}
+```
+
+---
+
+### Link them together
+
+```bash
+rustc main.rs mul.o
+```
+
+Rust hands everything to the **system linker (`ld`)**.
+
+---
+
+## PART 4 - What exactly is an object file?
+
+An ELF `.o` file contains:
+
+- `.text` → machine code
+- `.data` → initialized globals
+- `.bss` → uninitialized globals
+- `.symtab` → symbol table
+- `.rel.*` → relocation info
+
+Example:
+
+```bash
+readelf -s mul.o
+```
+
+You’ll see:
+
+```
+mul GLOBAL FUNC
+```
+
+This is what the linker uses.
+
+---
+
+## PART 5 - Shared Libraries (`.so`) explained deeply
+
+### What is a shared library?
+
+A **shared library**:
+
+- Contains position-independent machine code
+- Is loaded **at runtime**
+- Can be shared across multiple processes
+- Reduces memory usage
+- Can be updated independently
+
+---
+
+### How `.so` works at runtime
+
+1. Program starts
+2. Kernel loads ELF
+3. ELF interpreter (`ld-linux.so`) runs
+4. Dynamic linker:
+
+   - Loads needed `.so` files
+   - Resolves symbols
+   - Applies relocations
+
+5. Jumps to `main`
+
+Check dependencies:
+
+```bash
+ldd ./main
+```
+
+---
+
+### Creating a shared library in C
+
+```c
+// math.c
+int square(int x) {
+    return x * x;
+}
+```
+
+Compile:
+
+```bash
+gcc -fPIC -shared math.c -o libmath.so
+```
+
+---
+
+### Using it
+
+```c
+extern int square(int);
+
+int main() {
+    return square(5);
+}
+```
+
+```bash
+gcc main.c -L. -lmath -Wl,-rpath=. -o main
+```
+
+---
+
+### `-fPIC` - why it matters
+
+PIC = Position Independent Code
+Required so:
+
+- Library can be loaded at any memory address
+- Avoid text relocations
+
+---
+
+### Static vs Shared (very important)
+
+| Feature | Static `.a`      | Shared `.so`            |
+| ------- | ---------------- | ----------------------- |
+| Linked  | At compile time  | At runtime              |
+| Size    | Bigger binaries  | Smaller binaries        |
+| Updates | Recompile needed | Can update `.so`        |
+| Memory  | Per process      | Shared across processes |
+
+---
+
+## PART 6 - How all this fits together mentally
+
+```
+C source   Rust source
+   |           |
+ gcc -c     rustc
+   |           |
+ main.o     lib.o
+      \     /
+        ld
+         |
+       ELF binary
+```
+
+The linker only sees:
+
+- Symbols
+- Relocations
+- Addresses
+
+---
+
+## Q&A (Focused, Insightful)
+
+---
+
+### Q1. How can two different languages work together?
+
+**Because they agree on ABI and object file format, not language semantics.**
+
+---
+
+### Q2. What actually connects Rust and C code?
+
+**The system linker (`ld`) using symbol tables and relocation entries.**
+
+---
+
+### Q3. Why is `extern "C"` needed in Rust?
+
+**To force Rust to use the stable C ABI instead of Rust’s unstable ABI.**
+
+---
+
+### Q4. Why does name mangling break linking?
+
+**Because the linker matches symbols by name - mismatched names mean unresolved symbols.**
+
+---
+
+### Q5. Why do shared libraries need `-fPIC`?
+
+**Because they must run correctly regardless of where the kernel maps them in memory.**
+
+---
+
+### Q6. When is a `.so` actually loaded?
+
+**At program startup by the dynamic loader, before `main()` runs.**
+
+---
+
+### Q7. Is a `.so` part of the kernel?
+
+**No - it’s user-space code mapped into memory by the kernel and resolved by the dynamic loader.**
+
+---
+
+### Q8. Can Rust produce `.so` files?
+
+**Yes - using `cdylib` or `staticlib`. Rust integrates cleanly with C toolchains.**
+
+---
+
+### Q9. Why does linking fail even if compilation succeeds?
+
+**Because compilation checks syntax, but linking checks symbol resolution across translation units.**
+
+---
+
+### Q10. What is the _real_ boundary between languages?
+
+**The ABI + linker - not the compiler frontends.**
+
+---
+
+# 🐳 Containerization & Docker
+
+---
+
+## Q1. What is containerization in simple terms?
+
+**Containerization** is a way to package an application **with its runtime, libraries, and dependencies** so it runs the same everywhere, while **sharing the host OS kernel**.
+
+- VM → ships a full OS
+- Container → ships only _user-space_, reuses host kernel
+
+---
+
+## Q2. Is a Docker container a virtual machine?
+
+**No.**
+
+| VM                      | Container               |
+| ----------------------- | ----------------------- |
+| Has its own kernel      | Shares host kernel      |
+| Heavy (GBs)             | Lightweight (MBs)       |
+| Hardware virtualization | OS-level virtualization |
+
+Containers feel like mini-OSes, but they’re just **isolated processes**.
+
+---
+
+## Q3. What exactly is a Docker image?
+
+A **Docker image** is:
+
+- A **read-only filesystem snapshot**
+- Built in **layers**
+- Contains:
+
+  - OS user-space (e.g., Ubuntu files)
+  - Libraries
+  - Tools
+  - App binaries
+
+Example:
+
+```text
+ubuntu:22.04 image
+├── /bin
+├── /lib
+├── /usr
+└── /etc
+```
+
+-No kernel inside the image.
+
+---
+
+## Q4. What is a Docker container then?
+
+A **container** is:
+
+- A **running instance of an image**
+- Image layers + one writable layer
+- Has:
+
+  - Its own filesystem view
+  - Its own PID namespace
+  - Its own network namespace
+
+Think:
+
+> **Image = blueprint** > **Container = running process**
+
+---
+
+## Q5. If my host is macOS, how does a Linux container run?
+
+This is critical:
+
+### On macOS (and Windows):
+
+Docker **cannot use the host kernel** because:
+
+- macOS kernel ≠ Linux kernel
+
+So Docker Desktop:
+
+- Runs a **lightweight Linux VM**
+- That VM provides a **Linux kernel**
+- All containers run inside that VM
+
+```
+macOS
+ └── Linux VM (hidden)
+     └── Docker containers
+```
+
+---
+
+## Q6. Then how does `ubuntu:22.04` work on macOS?
+
+- `ubuntu:22.04` provides **Ubuntu user-space**
+- The **Linux kernel** comes from the hidden VM
+- Kernel version ≠ Ubuntu version
+
+You can check:
+
+```bash
+uname -a
+```
+
+---
+
+## Q7. How can Docker run containers for different CPU architectures?
+
+Docker supports **multi-architecture images**.
+
+Example:
+
+```bash
+docker run --platform=linux/amd64 ubuntu
+docker run --platform=linux/arm64 ubuntu
+```
+
+Behind the scenes:
+
+- Docker uses **QEMU emulation**
+- CPU instructions are translated dynamically
+
+⚠️ Slower than native, but perfect for:
+
+- Cross-compilation
+- Testing
+
+---
+
+## Q8. What is `--platform=linux/amd64` doing exactly?
+
+It tells Docker:
+
+- Pull the **amd64 version** of the image
+- Run it using **emulation** if needed
+
+This is why you can build:
+
+- Linux x86 binaries on Mac ARM
+
+---
+
+## Q9. How does compiling inside a container help?
+
+Because:
+
+- Compiler matches **target OS + architecture**
+- Output binaries are **native ELF**
+- No pollution of host system
+
+Example:
+
+```bash
+gcc hello.c -o hello
+file hello
+# ELF 64-bit LSB executable, x86-64
+```
+
+---
+
+## Q10. Where does my container filesystem live on my machine?
+
+By default:
+
+- Inside Docker’s internal VM storage
+- Not directly visible on host
+
+To access host files → **bind mount**
+
+---
+
+## Q11. What does this volume mount do?
+
+```bash
+-v $HOME/docker-work/ubuntu:/work
+```
+
+Meaning:
+
+- Host directory:
+  `$HOME/docker-work/ubuntu`
+- Container path:
+  `/work`
+
+Inside container:
+
+```bash
+/work  <==>  ~/docker-work/ubuntu on host
+```
+
+---
+
+## Q12. Can a container access all my host files?
+
+**Only if you mount them explicitly.**
+
+Example:
+
+```bash
+-v $HOME:/host-home
+```
+
+Inside container:
+
+```bash
+/host-home/Documents
+/host-home/Downloads
+```
+
+⚠️ Containers are isolated by default (security feature).
+
+---
+
+## Q13. What kernel features make containers possible?
+
+Linux kernel provides:
+
+- **Namespaces** → isolation (PID, net, mount, user)
+- **cgroups** → resource limits (CPU, memory)
+- **OverlayFS** → layered filesystems
+
+Docker is mostly a **user-friendly wrapper** over these.
+
+---
+
+## Q14. Basic Docker commands
+
+```bash
+# Run a container - interactive and tty
+docker run -it ubuntu bash
+
+# List running containers
+docker ps
+
+# List all containers
+docker ps -a
+
+# Stop container
+docker stop <name>
+
+# Start existing container
+docker start -i <name>
+
+# Remove container
+docker rm <name>
+
+# Remove image
+docker rmi ubuntu:22.04
+```
+
+---
